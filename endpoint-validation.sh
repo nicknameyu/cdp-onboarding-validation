@@ -1,11 +1,10 @@
 #!/bin/bash
 
-# versoin 0.1.0
+# versoin 0.1.1
 
 # Command line parameters
 # cloud provider: -p
 # geographic:     -g
-# endpoint file:  -c 
 # help:           -h
 
 # coming enhancement
@@ -13,7 +12,58 @@
       # - AWS: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html
       # - Azure: https://learn.microsoft.com/en-us/azure/virtual-machines/instance-metadata-service?tabs=linux
       # - GCP: https://cloud.google.com/compute/docs/metadata/overview
-# - Make -c command line parameter optional. When not provided, pull from github.
+
+################ ENDPOINTS ################
+global_endpoints=(
+  "https://raw.githubusercontent.com"
+  "https://github.com"
+  "https://s3.amazonaws.com"
+  "https://test.s3.amazonaws.com"
+  "https://archive.cloudera.com"
+  "https://api.us-west-1.cdp.cloudera.com"
+  "https://container.repository.cloudera.com"
+  "https://docker.repository.cloudera.com"
+  "https://container.repo.cloudera.com"
+  "https://auth.docker.io"
+  "https://cloudera-docker-dev.jfrog.io"
+  "https://docker-images-prod.s3.amazonaws.com"
+  "https://gcr.io"
+  "https://k8s.gcr.io"
+  "https://quay-registry.s3.amazonaws.com"
+  "https://quay.io"
+  "https://quayio-production-s3.s3.amazonaws.com"
+  "https://docker.io"
+  "https://production.cloudflare.docker.com"
+  "https://storage.googleapis.com"
+  "https://consoleauth.us-west-1.core.altus.cloudera.com"
+  "https://consoleauth.altus.cloudera.com"
+  "https://pypi.org"
+)
+
+us_endpoints=(
+  "https://test.v2.ccm.us-west-1.cdp.cloudera.com"
+  "https://dbusapi.us-west-1.sigma.altus.cloudera.com"
+  "http://api.us-west-1.cdp.cloudera.com"
+  "https://test.s3.us-west-2.amazonaws.com"
+)
+eu_endpoints=(
+  "https://test.v2.ccm.eu-1.cdp.cloudera.com"
+  "https://api.eu-1.cdp.cloudera.com"
+  "https://test.s3.eu-west-1.amazonaws.com"
+)
+ap_endpoints=(
+  "https://test.v2.ccm.ap-1.cdp.cloudera.com"
+  "https://api.ap-1.cdp.cloudera.com"
+  "https://test.s3.ap-southeast-1.amazonaws.com"
+)
+aws_endpoints=("https://sts.amazonaws.com")
+azure_endpoints=("https://management.azure.com")
+gcp_endpoints=(
+  "https://storage.googleapis.com",
+  "https://iamcredentials.googleapis.com"
+)
+################ End Endpoints ##############
+
 
 export RED='\033[0;31m'
 export GREEN='\033[0;32m'
@@ -29,9 +79,9 @@ check_https_url()
 	StatusCode=$(curl $1 --insecure --connect-timeout 4 -s -o /dev/null -w "%{http_code}")
 	if [ "$StatusCode" -ge 200 ] && [ "$StatusCode" -le 404 ];
 	then
-      printf "| %-60s | %-30s |\n" "${1}" "${GREEN} REACHABLE ${NORMAL}"
+      printf "| %-60s | ${GREEN}%-19s${NORMAL} |\n" "${1}" " REACHABLE "
 	else
-	    printf "| %-60s | %-30s |\n" "${1}" "${RED} NOT-REACHABLE ${NORMAL}"
+	    printf "| %-60s | ${RED}%-19s${NORMAL} |\n" "${1}" " NOT-REACHABLE "
         overallstatus=1
 	fi
 }
@@ -44,9 +94,9 @@ check_nonhttp()
   #Usage  nc -v -w 2 https://test.v2.ccm.eu-1.cdp.cloudera.com 443
 	check=`nc -v -w 2 $1 $2 | grep succeeded | wc -l`
 	if [ $check -eq 1 ];then
-	  printf "| %-60s | %-30s |\n" "${1}" "${GREEN} REACHABLE ${NORMAL}"
+	  printf "| %-60s | ${GREEN}%-19s${NORMAL} |\n" "${1}" " REACHABLE "
   else
-    printf "| %-60s | %-30s |\n" "${1}" "${RED} NOT-REACHABLE ${NORMAL}"
+    printf "| %-60s | ${RED}%-19s${NORMAL} |\n" "${1}" " NOT-REACHABLE "
     overallstatus=1;
   fi;
 }
@@ -94,6 +144,13 @@ do
               log "CDP Control plane region must be one of US, AP, EU." "FATAL"
               exit 2
             fi
+            if [ "$CDPcontrolplaneregion" = "US" ]; then
+              regional_endpoints=$us_endpoints
+            elif [ "$CDPcontrolplaneregion" = "EU" ]; then
+              regional_endpoints=$eu_endpoints
+            else
+              regional_endpoints=$ap_endpoints
+            fi
             ;;
         c)  export nw_endpoints=$OPTARG
             if [ -e $nw_endpoints ]; then
@@ -115,37 +172,39 @@ if [ -z "$CSP" ]; then
     log "Missing Cloud provider infomation, please use -p commandline option to specify the Cloud provider. " "FATAL"
     exit 2
 fi
+if [ "$CSP" = "aws" ]; then
+  csp_endpoints=$aws_endpoints
+elif [ "$CSP" = "azure" ]; then
+  csp_endpoints=$azure_endpoints
+else
+  csp_endpoints=$gcp_endpoints
+fi
 
 if [ -z "$CDPcontrolplaneregion" ]; then
     log "Missing CDP controplane region infomation, please use -g commandline option to specify the controplane location. " "FATAL"
     exit 2
 fi
 
-if [ -z "$nw_endpoints" ]; then
-    log "Missing location for config file, please use -c commandline option to specify the config file. " "FATAL"
-    exit 2
-fi
-
 log "CHECKING HTTPS ENDPOINTS" "INFO"
 
 echo "| ================================================================================== |"
-printf "| %-60s | %-10s | \n" "Endpoint URL" "Validation Result  "
+printf "| %-60s | %-19s | \n" "Endpoint URL" "Validation Result  "
 echo "| ================================================================================== |"
 
 # Checking general global endpoints
-for url in `cat $nw_endpoints|jq '.general.global[]'|tr -d '"'`
+for url in ${global_endpoints[@]}
 do
   check_https_url $url
 done
 
 # checking regional endpoints
-for url in `cat $nw_endpoints|jq ".general.${CDPcontrolplaneregion}[]"|tr -d '"'`
+for url in ${regional_endpoints[@]}
 do 
   check_https_url $url
 done
 
 # checking CSP endpoints
-for url in `cat $nw_endpoints|jq ".${CSP}[]"|tr -d '"'`
+for url in ${csp_endpoints[@]}
 do 
   check_https_url $url
 done
