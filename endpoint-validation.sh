@@ -1,17 +1,10 @@
 #!/bin/bash
 
 # versoin 0.1.1
-
 # Command line parameters
-# cloud provider: -p
-# geographic:     -g
+# cloud provider: -p   aws, azure, gcp
+# geographic:     -g   us, eu, ap
 # help:           -h
-
-# coming enhancement
-#   - Make -p and -g command line parameter optional. CSP info can be found with CSP metadata service. 
-      # - AWS: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html
-      # - Azure: https://learn.microsoft.com/en-us/azure/virtual-machines/instance-metadata-service?tabs=linux
-      # - GCP: https://cloud.google.com/compute/docs/metadata/overview
 
 ################ ENDPOINTS ################
 global_endpoints=(
@@ -43,7 +36,7 @@ global_endpoints=(
 us_endpoints=(
   "https://test.v2.ccm.us-west-1.cdp.cloudera.com"
   "https://dbusapi.us-west-1.sigma.altus.cloudera.com"
-  "http://api.us-west-1.cdp.cloudera.com"
+  "https://api.us-west-1.cdp.cloudera.com"
   "https://test.s3.us-west-2.amazonaws.com"
 )
 eu_endpoints=(
@@ -59,7 +52,7 @@ ap_endpoints=(
 aws_endpoints=("https://sts.amazonaws.com")
 azure_endpoints=("https://management.azure.com")
 gcp_endpoints=(
-  "https://storage.googleapis.com",
+  "https://storage.googleapis.com"
   "https://iamcredentials.googleapis.com"
 )
 ################ End Endpoints ##############
@@ -144,13 +137,6 @@ do
               log "CDP Control plane region must be one of US, AP, EU." "FATAL"
               exit 2
             fi
-            if [ "$CDPcontrolplaneregion" = "US" ]; then
-              regional_endpoints=$us_endpoints
-            elif [ "$CDPcontrolplaneregion" = "EU" ]; then
-              regional_endpoints=$eu_endpoints
-            else
-              regional_endpoints=$ap_endpoints
-            fi
             ;;
         c)  export nw_endpoints=$OPTARG
             if [ -e $nw_endpoints ]; then
@@ -160,7 +146,7 @@ do
               exit 2
             fi
             ;;
-        h) echo "$0 -p <Cloud Provider: aws|azure|gcp> -g <Geographic: us|eu|ap> -c <path to config file> [ -h ]"
+        h) echo "$0 [-p <Cloud Provider: aws|azure|gcp>] [-g <Geographic: us|eu|ap>] [ -h ]"
             ;;
         :) LOG "$OPTARG Option need a argument" "FATAL"
            exit 1
@@ -169,22 +155,96 @@ do
 done
 
 if [ -z "$CSP" ]; then
-    log "Missing Cloud provider infomation, please use -p commandline option to specify the Cloud provider. " "FATAL"
-    exit 2
+    log "Missing CSP info. Checking Meta data service for CSP. " "INFO"
+    curl -s -H Metadata:true --noproxy "*" "http://169.254.169.254/metadata/instance?api-version=2021-02-01" 2>/dev/null|grep -i azure > /dev/null
+    if [ $? -eq 0 ]; then
+      log "Azure environment found." "INFO"
+      CSP='azure'
+    fi
+    TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null`
+    curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/dynamic/instance-identity/document 2>/dev/null|grep instanceId >/dev/null
+    if [ $? -eq 0 ]; then
+      log "AWS environment found." "INFO"
+      CSP='aws'
+    fi
+    curl "http://metadata.google.internal/computeMetadata/v1/instance/image" -H "Metadata-Flavor: Google" >/dev/null 2>&1
+    if [ $? -eq 0 ]; then
+      log "GCP environment found." "INFO"
+      CSP='gcp'
+    fi
+    if [ -z "$CSP" ]; then
+      log "Missing Cloud provider infomation, and cannot identify CSP with meta data, please use -p commandline option to specify the Cloud provider. " "FATAL"
+      exit 2
+    fi
 fi
 if [ "$CSP" = "aws" ]; then
-  csp_endpoints=$aws_endpoints
+  csp_endpoints=${aws_endpoints[@]}
+  eu_regions=("af-south-1" "eu-central-1" "eu-central-2" "eu-north-1" "eu-south-1" "eu-south-2" "eu-west-1" "eu-west-2" "eu-west-3" "me-central-1" "me-south-1")
+  ap_regions=("ap-east-1" "ap-northeast-1" "ap-northeast-2" "ap-northeast-3" "ap-south-1" "ap-south-2" "ap-southeast-1" "ap-southeast-2" "ap-southeast-3" "ap-southeast-4" "cn-north-1" "cn-northwest-1")
+  us_regions=("sa-east-1" "us-east-1" "us-east-2" "us-gov-east-1" "us-gov-west-1" "us-west-1" "us-west-2" "ca-central-1")
+  TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null`
+  metadata=`curl -H "X-aws-ec2-metadata-token: $TOKEN" -v http://169.254.169.254/latest/dynamic/instance-identity/document 2>/dev/null`
 elif [ "$CSP" = "azure" ]; then
-  csp_endpoints=$azure_endpoints
+  csp_endpoints=${azure_endpoints[@]}
+  ap_regions=("eastasia" "southeastasia" "japanwest" "japaneast" "australiaeast" "australiasoutheast" "southindia" "centralindia" "westindia" "koreacentral" "koreasouth")
+  us_regions=("centralus" "eastus" "eastus2" "westus" "northcentralus" "southcentralus" "northeurope" "westeurope" "brazilsouth" "canadacentral" "canadaeast" "westcentralus" "westus2")
+  eu_regions=("uksouth" "ukwest" "francecentral" "francesouth" "australiacentral" "australiacentral2" "uaecentral" "uaenorth" "southafricanorth" "southafricawest")
+  metadata=`curl -s -H Metadata:true --noproxy "*" "http://169.254.169.254/metadata/instance?api-version=2021-02-01"`
 else
-  csp_endpoints=$gcp_endpoints
+  csp_endpoints=${gcp_endpoints[@]}
+  ap_regions=("asia-south1" "asia-south2" "asia-east1" "asia-east2" "asia-northeast1" "asia-northeast2" "asia-northeast3" "asia-southeast1" "australia-southeast1" "australia-southeast2")
+  eu_regions=("europe-central2" "europe-north2" "europe-southwest1" "europe-west1" "europe-west2" "europe-west3" "europe-west4" "europe-west4" "europe-west6" "europe-west8" "europe-west9")
+  us_regions=("northamerica-northeast1" "northamerica-northeast2" "southamerica-east1" "us-central1" "us-east1" "us-east4" "us-west1" "us-west1" "us-west2" "us-west3" "us-west4" "us-west-1")
+  metadata=`curl "http://metadata.google.internal/computeMetadata/v1/instance/zone" -H "Metadata-Flavor: Google" 2>/dev/null`
 fi
 
 if [ -z "$CDPcontrolplaneregion" ]; then
-    log "Missing CDP controplane region infomation, please use -g commandline option to specify the controplane location. " "FATAL"
+  log "Missing CDP controplane region infomation, using metadata default as the region mapping" "INFO"
+  if [ -z $CDPcontrolplaneregion ]; then
+      for location in ${us_regions[@]}
+      do
+        echo $metadata|grep $location >/dev/null
+        if [ $? -eq 0 ]; then
+          log "Found region $location, using US as the CDP control plane region" "INFO"
+          CDPcontrolplaneregion="US"
+          break
+        fi
+      done
+  fi
+  if [ -z $CDPcontrolplaneregion ]; then
+      for location in ${eu_regions[@]}
+      do
+        echo $metadata|grep $location >/dev/null
+        if [ $? -eq 0 ]; then
+          log "Found region $location, using EU as the CDP control plane region" "INFO"
+          CDPcontrolplaneregion="EU"
+          break
+        fi
+      done
+  fi
+  if [ -z $CDPcontrolplaneregion ]; then
+      for location in ${ap_regions[@]}
+      do
+        echo $metadata|grep $location >/dev/null
+        if [ $? -eq 0 ]; then
+          log "Found region $location, using AP as the CDP control plane region" "INFO"
+          CDPcontrolplaneregion="AP"
+          break
+        fi
+      done
+  fi
+  if [ -z $CDPcontrolplaneregion ]; then
+    log "Missing CDP controplane region infomation, and cannot identify region with metadata. Please use -g commandline option to specify the controplane location. " "FATAL"
     exit 2
+  fi
 fi
-
+if [ "$CDPcontrolplaneregion" = "US" ]; then
+  regional_endpoints=${us_endpoints[@]}
+elif [ "$CDPcontrolplaneregion" = "EU" ]; then
+  regional_endpoints=${eu_endpoints[@]}
+else
+  regional_endpoints=${ap_endpoints[@]}
+fi
 log "CHECKING HTTPS ENDPOINTS" "INFO"
 
 echo "| ================================================================================== |"
