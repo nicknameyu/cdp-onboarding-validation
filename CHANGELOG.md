@@ -1,5 +1,8 @@
 # CHANGELOG
 
+## Aug 31, 2023
+- `endpoint-validation.sh` v0.2.0
+- add AKS endpoint test
 ## May 15, 2023
 - `endpoint-validation.sh` v0.1.1
 - Use metadata of cloud provider to determine what CSP is it, what region is it.
