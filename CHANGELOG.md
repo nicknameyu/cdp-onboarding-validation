@@ -1,6 +1,9 @@
 # CHANGELOG
 
 ## Aug 31, 2023
+- `endpoint-validation.sh` v0.2.1
+- Bug fix for mcr data endpoint.
+## Aug 31, 2023
 - `endpoint-validation.sh` v0.2.0
 - add AKS endpoint test
 ## May 15, 2023

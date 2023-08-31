@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# versoin 0.2.0
+# versoin 0.2.1
 # Command line parameters
 # cloud provider: -p   aws, azure, gcp
 # geographic:     -g   us, eu, ap
@@ -59,7 +59,6 @@ gcp_endpoints=(
 
 aks_endpoints=(
   "https://mcr.microsoft.com"
-  "https://<location>.data.mcr.microsoft.com"
   "https://login.microsoftonline.com"
   "https://packages.microsoft.com"
   "https://acs-mirror.azureedge.net"
@@ -70,7 +69,21 @@ aks_endpoints=(
   "https://us.download.nvidia.com"
   "https://download.docker.com"
 )
-
+az_us_mcr_data_endpoints=(
+  "https://eastus.data.mcr.microsoft.com"
+  "https://westus.data.mcr.microsoft.com"
+  "https://westus2.data.mcr.microsoft.com"
+  "https://centralus.data.mcr.microsoft.com"
+  "https://westcentralus.data.mcr.microsoft.com"
+)
+az_eu_mcr_data_endpoints=(
+  "https://northeurope.data.mcr.microsoft.com"
+  "https://westeurope.data.mcr.microsoft.com"
+)
+az_ap_mcr_data_endpoints=(
+  "https://eastasia.data.mcr.microsoft.com"
+  "https://southeastasia.data.mcr.microsoft.com"
+)
 # use <location>.data.mcr.microsoft.com to test "*.data.mcr.microsoft.com"
 
 
@@ -310,10 +323,19 @@ done
 
 # Checking K8S endpoints
 if [ "$K8S" = "1" ]; then
-  location=`curl -s -H Metadata:true --noproxy "*" "http://169.254.169.254/metadata/instance?api-version=2021-02-01" |jq .compute.location|tr -d '"'`
   for url in ${k8s_endpoints[@]}
   do
-    url=`echo ${url/<location>/$location}`
+    check_https_url $url
+  done
+  if [ "$CDPcontrolplaneregion" = "US" ]; then
+    az_mcr_data_endpoints=${az_us_mcr_data_endpoints[@]}
+  elif [ "$CDPcontrolplaneregion" = "EU" ]; then
+    az_mcr_data_endpoints=${az_eu_mcr_data_endpoints[@]}
+  else
+    az_mcr_data_endpoints=${az_ap_mcr_data_endpoints[@]}
+  fi
+  for url in ${az_mcr_data_endpoints[@]}
+  do
     check_https_url $url
   done
 fi
